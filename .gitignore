@@ -1,0 +1,6 @@
+.vscode
+void/*.jpg
+void/*.png
+venv/
+images/
+*.png
