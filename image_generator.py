@@ -1,28 +1,14 @@
 from scipy.spatial import Voronoi
 from copy import deepcopy
 
-import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 
 
-def array_size(arr: np.ndarray):
-    memory_size = arr.itemsize
-    for s in arr.shape:
-        memory_size *= s
-    print(f"Array of size: {memory_size} bytes.")
-
-
-def angle_multiplier(angles: float):
+def angle_multiplier(angles: list[float]):
     cos = np.cos(angles).reshape(-1, 1)
     sin = np.sin(angles).reshape(-1, 1)
     return np.concatenate([cos, sin], axis=1)
-
-
-def generate_hexagon(r: int, center: list):
-    angles = np.linspace(0, np.pi * 5 / 3, 6) + np.pi / 6
-    points = r * angle_multiplier(angles) + np.array([center])
-    return points.astype(np.int32)
 
 
 def generate_background(n: int):
@@ -127,7 +113,6 @@ def main():
     # cv2.imshow("mask_subelement", mask_subelement)
 
     gray_image = generate_background(size)
-    array_size(gray_image)
 
     f = lambda s: np.random.randint(10, 40, s)
     gray_image = apply_mask(gray_image, mask_copper_out, f)
