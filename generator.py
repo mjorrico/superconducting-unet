@@ -59,7 +59,7 @@ def generate_hex_centroids(hex_width: float, origin: np.ndarray, variance: float
         shift_coeff = np.random.uniform(0.75, 0.86, (len(vertex), 1))
         outer_vertex = (vertex - centroids[i]) * shift_coeff + centroids[i]
         outer.append(outer_vertex)
-    
+
     inner = []
     for i, vertex in enumerate(outer):
         shift_coeff = np.random.uniform(0.6, 0.7, (len(vertex), 1))
@@ -100,18 +100,39 @@ def generate(rad: float, hex_width: float, variance: float = 0.1):
 
     return coating_inner, coating_outer, outer, inner, c
 
+
 coat_i, coat_o, h_out, h_in, k = generate(300, 25, 0.4)
 
-base = np.zeros((IMG_SIZE, IMG_SIZE))
-cv2.fillPoly(base, h_out + h_in, 255)
+base = np.zeros((IMG_SIZE, IMG_SIZE), dtype=np.uint8)
+all_img = cv2.fillPoly(deepcopy(base), h_out + h_in + [coat_i] + [coat_o], 255)
 
 for p in k:
     p = p.astype(np.int32)
-    cv2.circle(base, p, 3, 140)
-cv2.imwrite("test.png", base)
+    cv2.circle(all_img, p, 3, 140)
+cv2.imwrite("test.png", all_img)
 
-N = 10000
+
+coat_in_img = cv2.fillPoly(deepcopy(base), [coat_i] + h_out, 255)
+cv2.imwrite("coat_in.png", coat_in_img)
+
+void = cv2.imread("void/1.png", cv2.IMREAD_GRAYSCALE)
+void = cv2.resize(void, (20, 20))
+_, void = cv2.threshold(void, 127, 255, cv2.THRESH_BINARY_INV)
+
 start = time()
-for i in range(N):
-    generate(300, 25, 0.4)
-print(f"Generating {N} images, time per image: {(time() - start) / N}")
+base_void = deepcopy(base)
+for i in range(300):
+    x, y = np.int32(np.random.uniform(0, IMG_SIZE - 1 - 20, (2)))
+    patch = base_void[x : x + 20, y : y + 20]
+    base_void[x : x + 20, y : y + 20] = cv2.bitwise_or(patch, void)
+
+coat_img_in = cv2.bitwise_and(coat_in_img, base_void)
+print(f"Time elapsed: {time() - start} seconds")
+
+cv2.imwrite("void.jpg", coat_img_in)
+
+# N = 10000
+# start = time()
+# for i in range(N):
+#     generate(300, 25, 0.4)
+# print(f"Generating {N} images, time per image: {(time() - start) / N}")
