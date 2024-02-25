@@ -130,6 +130,7 @@ coat_img_in = cv2.bitwise_and(coat_in_img, base_void)
 print(f"Time elapsed: {time() - start} seconds")
 
 cv2.imwrite("void.jpg", coat_img_in)
+print()
 
 # N = 10000
 # start = time()
