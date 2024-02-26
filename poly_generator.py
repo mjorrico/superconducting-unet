@@ -7,7 +7,6 @@ import cv2
 
 import matplotlib.pyplot as plt
 
-IMG_SIZE = 1000
 TWOPI = 2 * np.pi
 
 
@@ -89,8 +88,8 @@ def generate_coating(rad: float, origin: np.ndarray):
     return coat_inner_poly, coat_outer_poly
 
 
-def generate(rad: float, hex_width: float, variance: float = 0.1):
-    origin = np.array([IMG_SIZE / 2] * 2, dtype=np.int32)
+def generate(rad: float, hex_width: float, variance: float = 0.1, imgsize: int = 1000):
+    origin = np.array([imgsize / 2] * 2, dtype=np.int32)
 
     # coating polygon generation
     coating_inner, coating_outer = generate_coating(rad, origin)
@@ -98,42 +97,4 @@ def generate(rad: float, hex_width: float, variance: float = 0.1):
     # sub-elements polygons generation
     outer, inner, c = generate_hex_centroids(hex_width, origin, variance)
 
-    return coating_inner, coating_outer, outer, inner, c
-
-
-coat_i, coat_o, h_out, h_in, k = generate(300, 25, 0.4)
-
-base = np.zeros((IMG_SIZE, IMG_SIZE), dtype=np.uint8)
-all_img = cv2.fillPoly(deepcopy(base), h_out + h_in + [coat_i] + [coat_o], 255)
-
-for p in k:
-    p = p.astype(np.int32)
-    cv2.circle(all_img, p, 3, 140)
-cv2.imwrite("test.png", all_img)
-
-
-coat_in_img = cv2.fillPoly(deepcopy(base), [coat_i] + h_out, 255)
-cv2.imwrite("coat_in.png", coat_in_img)
-
-void = cv2.imread("void/1.png", cv2.IMREAD_GRAYSCALE)
-void = cv2.resize(void, (20, 20))
-_, void = cv2.threshold(void, 127, 255, cv2.THRESH_BINARY_INV)
-
-start = time()
-base_void = deepcopy(base)
-for i in range(300):
-    x, y = np.int32(np.random.uniform(0, IMG_SIZE - 1 - 20, (2)))
-    patch = base_void[x : x + 20, y : y + 20]
-    base_void[x : x + 20, y : y + 20] = cv2.bitwise_or(patch, void)
-
-coat_img_in = cv2.bitwise_and(coat_in_img, base_void)
-print(f"Time elapsed: {time() - start} seconds")
-
-cv2.imwrite("void.jpg", coat_img_in)
-print()
-
-# N = 10000
-# start = time()
-# for i in range(N):
-#     generate(300, 25, 0.4)
-# print(f"Generating {N} images, time per image: {(time() - start) / N}")
+    return [coating_inner], [coating_outer], outer, inner, c
