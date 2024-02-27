@@ -97,4 +97,4 @@ def generate(rad: float, hex_width: float, variance: float = 0.1, imgsize: int =
     # sub-elements polygons generation
     outer, inner, c = generate_hex_centroids(hex_width, origin, variance)
 
-    return [coating_inner], [coating_outer], outer, inner, c
+    return [coating_inner], [coating_outer], inner, outer, c
