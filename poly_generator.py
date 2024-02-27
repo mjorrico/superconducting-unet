@@ -1,22 +1,12 @@
-from scipy.spatial import Voronoi, voronoi_plot_2d
+from scipy.spatial import Voronoi
 from copy import deepcopy
-from time import time, sleep
-
 import numpy as np
-import cv2
-
-import matplotlib.pyplot as plt
 
 TWOPI = 2 * np.pi
 
 
 def circle_multiplier(n: int, offset: float = 0):
-    angles = np.linspace(
-        offset,
-        TWOPI * (1 - 1 / n) + offset,
-        n,
-        dtype=np.float32,
-    )
+    angles = np.linspace(offset, TWOPI * (1 - 1 / n) + offset, n, dtype=np.float32)
     cos = np.cos(angles).reshape(-1, 1)
     sin = np.sin(angles).reshape(-1, 1)
     return np.concatenate([cos, sin], axis=1)
@@ -68,7 +58,7 @@ def generate_hex_centroids(hex_width: float, origin: np.ndarray, variance: float
     outer = [v.astype(np.int32) for v in outer]
     inner = [v.astype(np.int32) for v in inner]
 
-    return outer, inner, centroids
+    return inner, outer
 
 
 def generate_coating(rad: float, origin: np.ndarray):
@@ -95,6 +85,6 @@ def generate(rad: float, hex_width: float, variance: float = 0.1, imgsize: int =
     coating_inner, coating_outer = generate_coating(rad, origin)
 
     # sub-elements polygons generation
-    outer, inner, c = generate_hex_centroids(hex_width, origin, variance)
+    hex_inner, hex_outer = generate_hex_centroids(hex_width, origin, variance)
 
-    return [coating_inner], [coating_outer], inner, outer, c
+    return [coating_inner], [coating_outer], hex_inner, hex_outer

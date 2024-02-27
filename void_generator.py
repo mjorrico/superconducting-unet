@@ -2,52 +2,58 @@ import numpy as np
 import glob
 import cv2
 
-rawvoid_250 = []
-rawvoid_007 = []
-rawvoid_010 = []
-rawvoid_020 = []
-voidpath = "void/*.png"
-for imgpath in glob.glob(voidpath):
-    raw = cv2.imread(imgpath)
-    raw = cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
-    _, raw = cv2.threshold(raw, 127, 255, cv2.THRESH_BINARY_INV)
-    rawvoid_250.append(raw)
+import pyarrow as pa
+import pyarrow.parquet as pq
 
-    img = cv2.resize(raw, (20, 20))
-    _, img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
-    rawvoid_020.append(img)
+void50_raw = pq.read_table("void/void-50.parquet")
+void_filename = void50_raw.column_names
+void50 = np.stack(
+    [np.array(void50_raw[file]).reshape(50, 50) for file in void_filename]
+)
 
-    img = cv2.resize(raw, (10, 10))
-    _, img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
-    rawvoid_010.append(img)
+print(np.shape(void50))
 
-    img = cv2.resize(raw, (7, 7))
-    _, img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
-    rawvoid_007.append(img)
+void20 = []
+void15 = []
+void10 = []
+void07 = []
 
-center = [int(i/2) for i in np.shape(rawvoid_250[0])]
-print(np.shape(rawvoid_007[0]))
-rotation_matrix = cv2.getRotationMatrix2D(center, 45, 1)
-rotated_image = cv2.warpAffine(rawvoid_250[0], rotation_matrix, np.shape(rawvoid_250[0]))
-print(np.shape(rawvoid_250[0]))
-print(np.shape(rotated_image))
-cv2.imwrite("rotate.jpg", rotated_image)
+for i, v50 in enumerate(void50):
+    v20 = cv2.resize(v50, (20, 20))
+    _, v20 = cv2.threshold(v20, 127, 255, cv2.THRESH_BINARY)
+    void20.append(v20)
 
 
-def impose_void(big_image: np.ndarray, small_image: np.ndarray):
-    base = np.zeros_like(big_image)
+    v15 = cv2.resize(v50, (15, 15))
+    _, v15 = cv2.threshold(v15, 127, 255, cv2.THRESH_BINARY)
+    void15.append(v15)
 
-    b_height, b_width = np.shape(big_image)
-    s_height, s_width = np.shape(small_image)
-    s_height_half = np.int32(s_height / 2)
-    s_width_half = np.int32(s_width / 2)
-    height_range = b_height - s_height
-    width_range = b_width - s_width
 
-    for i in range(100):  # tries 100 times to impose
-        x = np.random.randint(0, height_range)
-        y = np.random.randint(0, width_range)
-        if big_image[x + s_height_half, y + s_width_half] == 255:
-            patch = base[x : x + s_height, y : y + s_width]
-            base[x : x + s_height, y : y + s_width] = cv2.bitwise_and(patch, small_image)
-    
+    v10 = cv2.resize(v50, (10, 10))
+    _, v10 = cv2.threshold(v10, 127, 255, cv2.THRESH_BINARY)
+    void10.append(v10)
+
+
+    v07 = cv2.resize(v50, (7, 7))
+    _, v07 = cv2.threshold(v07, 127, 255, cv2.THRESH_BINARY)
+    void07.append(v07)
+
+void20 = np.stack(void20)
+void15 = np.stack(void15)
+void10 = np.stack(void10)
+void07 = np.stack(void07)
+
+dvoid20 = {f"void-20-{k[8:12]}.png": v.reshape(-1) for k, v in zip(void_filename, void20)}
+dvoid15 = {f"void-15-{k[8:12]}.png": v.reshape(-1) for k, v in zip(void_filename, void15)}
+dvoid10 = {f"void-10-{k[8:12]}.png": v.reshape(-1) for k, v in zip(void_filename, void10)}
+dvoid07 = {f"void-07-{k[8:12]}.png": v.reshape(-1) for k, v in zip(void_filename, void07)}
+
+tvoid20 = pa.table(dvoid20)
+tvoid15 = pa.table(dvoid15)
+tvoid10 = pa.table(dvoid10)
+tvoid07 = pa.table(dvoid07)
+
+pq.write_table(tvoid20, "void-20.parquet")
+pq.write_table(tvoid15, "void-15.parquet")
+pq.write_table(tvoid10, "void-10.parquet")
+pq.write_table(tvoid07, "void-07.parquet")
