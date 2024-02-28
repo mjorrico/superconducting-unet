@@ -2,8 +2,8 @@ from scipy.spatial import Voronoi
 from copy import deepcopy
 import numpy as np
 
-TWOPI = 2 * np.pi
 
+TWOPI = 2 * np.pi
 
 def circle_multiplier(n: int, offset: float = 0):
     angles = np.linspace(offset, TWOPI * (1 - 1 / n) + offset, n, dtype=np.float32)
