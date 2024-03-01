@@ -1,9 +1,13 @@
+from datetime import datetime
 from copy import deepcopy
 import poly_generator as pg
+import pyarrow as pa
 import pyarrow.parquet as pq
 import glob
 import os
+from time import time
 
+import concurrent.futures
 import warnings
 import numpy as np
 import cv2
@@ -49,16 +53,15 @@ def random_transform(imagesize, radius):
     return chain_affine_transformation(rotation_mat, translation_mat)
 
 
-def __generate_superconducting_wire(
-    voiddict: dict,
-    radius: int = 300,
-    elementsize: int = 20,
-    variance: float = 0.2,
-    imagesize: int = 1000,
-    nbigvoid: int = 30,
-    nsmallvoid: int = 100,
-    smallvoidweights: list = [1, 2, 1],
-):
+def generate_superconducting_wire(voiddict: dict):
+    radius = 400
+    elementsize = 28
+    variance = 0.4
+    imagesize = 1000
+    nbigvoid = 70
+    nsmallvoid = 150
+    smallvoidweights = [1, 2, 2]
+
     coat_in, coat_out, hexagon_in, hexagon_out = pg.generate(
         radius, elementsize, variance, imagesize
     )
@@ -159,17 +162,20 @@ def __generate_superconducting_wire(
 
     # BEGIN DRAWING
     finalimg = apply_mask(deepcopy(zerosmatrix), coat_mask, 10, 20)
-    finalimg = apply_mask(finalimg, copper_mask, 170, 190)
-    finalimg = apply_mask(finalimg, subelement_mask, 210, 220)
-    finalimg = apply_mask(finalimg, void_small_mask, 50, 80)
-    finalimg = apply_mask(finalimg, void_big_mask, 50, 80)
+    finalimg = apply_mask(finalimg, copper_mask, 120, 190)
+    finalimg = apply_mask(finalimg, subelement_mask, 180, 220)
+    finalimg = apply_mask(finalimg, void_mask, 50, 80)
+    # finalimg = apply_mask(finalimg, void_big_mask, 50, 80)
 
     mask = np.stack((copper_mask, subelement_mask, void_mask), axis=-1)
     # END DRAWING
 
     # BEGIN TRANSLATION
-    translation_matrix = random_transform(imagesize, radius)
-    
+    # translation_matrix = random_transform(imagesize, radius)
+    rotation_angle = np.random.uniform(0, 360)
+    c = int(imagesize) / 2
+    translation_matrix = cv2.getRotationMatrix2D([c, c], rotation_angle, 1)
+
     finalimg = cv2.warpAffine(finalimg, translation_matrix, np.shape(finalimg))
     mask = cv2.warpAffine(mask, translation_matrix, np.shape(finalimg))
     background = cv2.warpAffine(background, translation_matrix, np.shape(finalimg))
@@ -177,26 +183,92 @@ def __generate_superconducting_wire(
 
     # FINALIZE AND RETURN OUTPUT
     _, background = cv2.threshold(background, 127, 255, cv2.THRESH_BINARY_INV)
-    background = apply_mask(background, background,  0, 255)
+    bg_color = np.random.randint(0, 200)
+    background = apply_mask(background, background, bg_color, bg_color + 50)
 
-    finalimg = cv2.blur(finalimg, (3, 3))
     finalimg = cv2.add(finalimg, background)
+    finalimg = cv2.blur(finalimg, (3, 3))
 
-    return finalimg, mask, background
+    return finalimg, mask
+    # return finalimg.flatten(), np.moveaxis(mask, -1, 0).flatten()
+
+
+def __batch_cropper(image, mask, N):
+    cropsize = 252
+
+    imagesize = np.shape(image)[0]
+    if cropsize > imagesize:
+        raise ValueError("Crop size must be smaller than image size.")
+
+    xcrop = np.random.randint(0, imagesize - cropsize, N)
+    ycrop = np.random.randint(0, imagesize - cropsize, N)
+
+    image_list = []
+    masks_list = []
+    for i in range(N):
+        xs = xcrop[i]
+        ys = ycrop[i]
+        xe = xs + cropsize
+        ye = ys + cropsize
+        pad = 44
+
+        img_crop = deepcopy(image[xs:xe, ys:ye])
+        msk_crop = deepcopy(mask[xs + pad : xe - pad, ys + pad : ye - pad, :])
+
+        image_list.append(img_crop)
+        masks_list.append(msk_crop)
+
+    return image_list, masks_list
+
+
+def batch_cropper(
+    voiddict: dict,
+    N_crop: int,
+    imgdir: str,
+    maskdir: str,
+    fileprefix: str,
+    imgidx: int,
+):
+    img, mask = generate_superconducting_wire(voiddict)
+    image_list, masks_list = __batch_cropper(img, mask, N_crop)
+
+    pairs = zip(image_list, masks_list)
+    for i, (img, mask) in enumerate(pairs):
+        globalidx = N_crop * imgidx + i
+        imgname = os.path.join(imgdir, f"{fileprefix}-{globalidx}.png")
+        maskname = os.path.join(maskdir, f"{fileprefix}-{globalidx}.png")
+
+        cv2.imwrite(imgname, img)
+        cv2.imwrite(maskname, mask)
+
+
+def batch_generate_wire(
+    folderpath: str,
+    voiddict: dict,
+    N_img: int = 1,
+    N_crop: int = 5,
+):
+    current_datetime = datetime.now()
+    datestr = current_datetime.strftime("%Y-%m-%d-%H-%M-%S-%f")[:-3]
+    img_dir = os.path.join(folderpath, "img")
+    mask_dir = os.path.join(folderpath, "mask")
+    os.makedirs(img_dir, exist_ok=True)
+    os.makedirs(mask_dir, exist_ok=True)
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
+        futures = [
+            executor.submit(
+                batch_cropper, voiddict, N_crop, img_dir, mask_dir, datestr, i
+            )
+            for i in range(N_img)
+        ]
+
+        concurrent.futures.wait(futures)
 
 
 voiddict = read_void("void/")
-img, mask, background = __generate_superconducting_wire(voiddict, 300, 20, 0.2, 1000, 20, 100, [1, 2, 2])
-cv2.imwrite("test.jpg", img)
-cv2.imwrite("testmask.jpg", mask)
-cv2.imwrite("testbackground.jpg", background)
-
-from time import time
 
 start = time()
-N = 1000
-for i in range(N):
-    print(f"Progress: {i+1}/{N}.")
-    __generate_superconducting_wire(voiddict, 300, 20, 0.2, 1000, 20, 100, [1, 2, 2])
-elapsed = time() - start
-print(f"Time elapsed: {elapsed} seconds or {elapsed / N} seconds per image")
+batch_generate_wire("data/train", voiddict, 1000, 20)
+end = time() - start
+print(f"Time elapsed: {end} seconds")
