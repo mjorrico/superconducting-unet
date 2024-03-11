@@ -1,39 +1,37 @@
 import os
 from PIL import Image
+import torch
 from torch.utils.data import Dataset
 import numpy as np
 
 
 class SuperWireDataset(Dataset):
-    def __init__(self, image_dir, mask_dir, transform, augment_factor):
+    def __init__(self, image_dir, mask_dir, transform, is_train=False):
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.transform = transform
-        self.augment_factor = augment_factor
         self.images = os.listdir(self.image_dir)
+        self.is_train = is_train
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, index):
-        image_path = os.path.join(self.image_dir, self.images[index])
-        mask_path = os.path.join(self.mask_dir, self.images[index])
+        filename = self.images[index]
+        image_path = os.path.join(self.image_dir, filename)
+        mask_path = os.path.join(self.mask_dir, filename.replace(".jpg", ".png"))
 
         image = np.array(Image.open(image_path).convert("L"), dtype=np.uint8)
-        mask = np.array(Image.open(mask_path).convert("RGB"), dtype=np.float32)
-        mask[mask == 255] = 1.0
+        mask = np.array(Image.open(mask_path).convert("RGB"), dtype=np.uint8)
 
-        image = self.transform(image=image, mask=mask)
+        aug = self.transform(image=image, mask=mask)
         image = aug["image"]
         mask = aug["mask"]
 
-        return image, mask
+        if self.is_train:
+            mask_background = (torch.sum(mask, dim=-1) == 0).unsqueeze(-1) * 255
+            mask = torch.concatenate((mask, mask_background), dim=-1)
+        mask = torch.moveaxis(mask, -1, 0)
+        mask[mask == 255] = 1 # mask isn't normalized by albumentations.Normalize
 
-from time import time
-if __name__ == "__main__":
-    data = SuperWireDataset("data/train/img", "data/train/mask")
-    start = time()
-    for i in range(1000):
-        image, mask = data[i+10000]
-    print(f"Time to fetch: {time() - start} seconds")
-    print(np.shape(image), np.shape(mask))
+        return image, mask

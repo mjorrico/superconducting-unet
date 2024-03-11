@@ -1,5 +1,7 @@
-.vscode
-.venv
+.vscode/
+.venv/
+.ipynb_checkpoints/
+runs/
 void/*.jpg
 void/*.png
 venv/
@@ -8,3 +10,4 @@ images/
 *.jpg
 __*__
 *.tar.gz
+*.pth.tar
