@@ -87,7 +87,7 @@ def test():
             preds = model(x)
     print(preds.shape)
     print(f"Time elapsed: {time() - start} seconds")
-    summary(model, input_size=(10, 1, 240, 240), )
+    summary(model, input_size=(10, 1, 240, 240))
 
 
 if __name__ == "__main__":

@@ -107,6 +107,7 @@ def save_predictions_as_imgs(
         preds = preds[:, :3, :, :].float()
         y = y[:, :3, :, :].float()
 
+        os.makedirs(folder, exist_ok=True)
         pred_path = os.path.join(folder, f"pred_{idx}.png")
         truth_path = os.path.join(folder, f"truth_{idx}.png")
         torchvision.utils.save_image(preds, pred_path)

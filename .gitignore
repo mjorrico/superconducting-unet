@@ -11,3 +11,5 @@ images/
 __*__
 *.tar.gz
 *.pth.tar
+
+useful_functions.py

@@ -13,15 +13,35 @@ import numpy as np
 import cv2
 
 
-def apply_mask(image, mask, mean, std):
-    shape = np.shape(image)[:2]
-    noise = np.random.randn(*shape) * std + mean
-    noise = np.clip(noise, 1, 254)
-    noise = noise.astype(np.uint8)
-    noise = cv2.bitwise_and(noise, noise, mask=mask)
-    final_image = cv2.bitwise_and(image, image, mask=cv2.bitwise_not(mask))
-    final_image = cv2.add(final_image, noise)
-    return final_image
+def spread_void(void_group, n_void, copper_mask, void_mask, n_trial=300):
+    imagesize = len(copper_mask)
+    for _ in range(n_void):
+        is_succeed = False
+        for _ in range(n_trial):  # multiple attempts to insert void
+            xpos, ypos = np.random.randint(0, imagesize - 20, 2)
+            xcheck = xpos + 10
+            ycheck = ypos + 10
+
+            if copper_mask[xcheck, ycheck] > 0:
+                is_succeed = True
+                break
+
+        if not is_succeed:
+            break
+
+        chosen_void = deepcopy(void_group[np.random.randint(0, len(void_group))])
+        cv2.bitwise_and(
+            chosen_void,
+            copper_mask[xpos : xpos + 20, ypos : ypos + 20],
+            chosen_void,
+        )
+        cv2.bitwise_or(
+            chosen_void,
+            void_mask[xpos : xpos + 20, ypos : ypos + 20],
+            chosen_void,
+        )
+
+        void_mask[xpos : xpos + 20, ypos : ypos + 20] = chosen_void
 
 
 def read_void(path: str):
@@ -36,40 +56,25 @@ def read_void(path: str):
     return void
 
 
-def chain_affine_transformation(M0, M1):
-    T0 = np.vstack((M0, np.array([0, 0, 1])))
-    T1 = np.vstack((M1, np.array([0, 0, 1])))
-    T = np.matmul(T1, T0)
-    return T[:2, :]
-
-
-def random_transform(imagesize, radius):
-    c = int(imagesize / 2)
-    shiftrange = c - radius
-    rotation_angle = np.random.uniform(0, 360)
-    xshift, yshift = np.random.uniform(-shiftrange, shiftrange, 2)
-
-    rotation_mat = cv2.getRotationMatrix2D([c, c], rotation_angle, 1)
-    translation_mat = np.array([[1, 0, xshift], [0, 1, yshift]], dtype=np.float32)
-
-    return chain_affine_transformation(rotation_mat, translation_mat)
-
-
 def generate_superconducting_wire(voiddict: dict):
     radius = 400
     elementsize = 31
     variance = 0.4
     imagesize = 1000
-    nbigvoid = 70
-    nsmallvoid = 150
-    smallvoidweights = [1, 2, 2]
+    n_big_void = 70
+    n_small_void = 150
+    small_void_weights = [1, 2, 2]
+    small_void_sizes = [15, 10, 7]
 
+    zerosmatrix = np.zeros((imagesize, imagesize), dtype=np.uint8)
     coat_in, coat_out, hexagon_in, hexagon_out = pg.generate(
-        radius, elementsize, variance, imagesize
+        radius,
+        elementsize,
+        variance,
+        imagesize,
     )
 
-    copper_mask_outer = np.zeros((1000, 1000), dtype=np.uint8)
-    copper_mask_outer = cv2.fillPoly(copper_mask_outer, coat_in + hexagon_out, 255)
+    copper_mask_outer = cv2.fillPoly(deepcopy(zerosmatrix), coat_in + hexagon_out, 255)
 
     fillrate = np.sum(copper_mask_outer > 0)
     if fillrate < 0.01:
@@ -78,22 +83,21 @@ def generate_superconducting_wire(voiddict: dict):
         warnings.warn("Copper fillrate is lower than 5%.", UserWarning)
 
     # BEGIN GENERATING SMALL VOID
-    sum = np.sum(smallvoidweights)
-    N_small_voids = np.array(smallvoidweights) / sum * nsmallvoid
+    s = np.sum(small_void_weights)
+    N_small_voids = np.array(small_void_weights) / s * n_small_void
     N_small_voids = N_small_voids.astype(np.int32)
-    small_void_sizes = [15, 10, 7]
 
     void_small_mask = np.zeros_like(copper_mask_outer)
 
     for size, N_void in zip(small_void_sizes, N_small_voids):
         for _ in range(N_void):
-            # tries 100 times to place void on copper
+
             is_succeed = False
-            for _ in range(100):
-                xpos = np.random.randint(0, imagesize - size)
-                ypos = np.random.randint(0, imagesize - size)
+            for _ in range(100):  # tries 100 times to place void on copper
+                xpos, ypos = np.random.randint(0, imagesize - size, 2)
                 xcheck = xpos + int(size / 2)
                 ycheck = ypos + int(size / 2)
+
                 if copper_mask_outer[xcheck, ycheck] > 0:
                     is_succeed = True
                     break
@@ -101,34 +105,33 @@ def generate_superconducting_wire(voiddict: dict):
             if not is_succeed:
                 break
 
-            vgroup = voiddict[size]
-            chosenvoid = deepcopy(vgroup[np.random.randint(0, len(vgroup))])
+            void_group = voiddict[size]
+            chosen_void = deepcopy(void_group[np.random.randint(0, len(void_group))])
             cv2.bitwise_and(
-                chosenvoid,
+                chosen_void,
                 copper_mask_outer[xpos : xpos + size, ypos : ypos + size],
-                chosenvoid,
+                chosen_void,
             )
             cv2.bitwise_or(
-                chosenvoid,
+                chosen_void,
                 void_small_mask[xpos : xpos + size, ypos : ypos + size],
-                chosenvoid,
+                chosen_void,
             )
-            void_small_mask[xpos : xpos + size, ypos : ypos + size] = chosenvoid
-    # END GENERATING SMALL VOID
+
+            void_small_mask[xpos : xpos + size, ypos : ypos + size] = chosen_void
 
     # BEGIN GENERATING BIG VOID
-    copper_mask_inner = np.zeros((1000, 1000), dtype=np.uint8)
-    copper_mask_inner = cv2.fillPoly(copper_mask_inner, hexagon_in, 255)
+    copper_mask_inner = cv2.fillPoly(deepcopy(zerosmatrix), hexagon_in, 255)
     void_big_mask = np.zeros_like(copper_mask_inner)
 
-    for _ in range(nbigvoid):
-        # tries 300 times to place void on copper
+    for _ in range(n_big_void):
+
         is_succeed = False
-        for _ in range(300):
-            xpos = np.random.randint(0, imagesize - 20)
-            ypos = np.random.randint(0, imagesize - 20)
+        for _ in range(300):  # tries 300 times to place void on copper
+            xpos, ypos = np.random.randint(0, imagesize - 20, 2)
             xcheck = xpos + 10
             ycheck = ypos + 10
+
             if copper_mask_inner[xcheck, ycheck] > 0:
                 is_succeed = True
                 break
@@ -136,76 +139,60 @@ def generate_superconducting_wire(voiddict: dict):
         if not is_succeed:
             break
 
-        vgroup = voiddict[20]
-        chosenvoid = deepcopy(vgroup[np.random.randint(0, len(vgroup))])
+        void_group = voiddict[20]
+        chosen_void = deepcopy(void_group[np.random.randint(0, len(void_group))])
         cv2.bitwise_and(
-            chosenvoid,
+            chosen_void,
             copper_mask_inner[xpos : xpos + 20, ypos : ypos + 20],
-            chosenvoid,
+            chosen_void,
         )
         cv2.bitwise_or(
-            chosenvoid,
+            chosen_void,
             void_big_mask[xpos : xpos + 20, ypos : ypos + 20],
-            chosenvoid,
+            chosen_void,
         )
-        void_big_mask[xpos : xpos + 20, ypos : ypos + 20] = chosenvoid
-    # END GENERATING BIG VOID
-    
+
+        void_big_mask[xpos : xpos + 20, ypos : ypos + 20] = chosen_void
+
     # BEGIN MASKS GENERATION
-    # In total we should have 6 masks (4 generated here plus 2 void masks previously generated)
-    zerosmatrix = np.zeros((imagesize, imagesize), dtype=np.uint8)
     coat_mask = cv2.fillPoly(deepcopy(zerosmatrix), coat_out + coat_in, 255)
     subelement_mask = cv2.fillPoly(deepcopy(zerosmatrix), hexagon_out + hexagon_in, 255)
     void_mask = np.add(void_small_mask, void_big_mask)
     copper_mask = cv2.add(copper_mask_outer, copper_mask_inner)
     copper_mask = cv2.subtract(copper_mask, void_mask)
-    background = cv2.fillPoly(deepcopy(zerosmatrix), coat_out, 255)
-    # END MASKS GENERATION
-    
-    # BEGIN DRAWING
-    finalimg = apply_mask(deepcopy(zerosmatrix), coat_mask, 20, 5)
-    finalimg = apply_mask(finalimg, copper_mask, 135, 9.8)
-    finalimg = apply_mask(finalimg, subelement_mask, 200, 13)
-    finalimg = apply_mask(finalimg, void_mask, 50, 25)
-    # finalimg = apply_mask(finalimg, void_big_mask, 50, 80)
-
     mask = np.stack((copper_mask, subelement_mask, void_mask), axis=-1)
-    # END DRAWING
 
+    # BEGIN DRAWING
+    finalimg = deepcopy(zerosmatrix)
+    finalimg[coat_mask == 255] = 20
+    finalimg[copper_mask == 255] = 135
+    finalimg[subelement_mask == 255] = 200
+    finalimg[void_mask == 255] = 50
 
     # BEGIN TRANSLATION
-    # translation_matrix = random_transform(imagesize, radius)
     rotation_angle = np.random.uniform(0, 360)
     c = int(imagesize / 2)
-    translation_matrix = cv2.getRotationMatrix2D([c, c], rotation_angle, 1)
-    # finalimg = cv2.warpAffine(finalimg, translation_matrix, np.shape(finalimg))
-    # mask = cv2.warpAffine(mask, translation_matrix, np.shape(finalimg))
-    mask_max = np.max(mask, axis=2)
-    mask = (mask == np.expand_dims(mask_max, -1)) * 255
-    mask_white = np.expand_dims(np.sum(mask, axis=-1) == 255 * 3, -1) * 255
-    mask = mask - mask_white
-    background = cv2.warpAffine(background, translation_matrix, np.shape(finalimg))
-    # END TRANSLATION
+    t_mat = cv2.getRotationMatrix2D([c, c], rotation_angle, 1)
+    t_flag = cv2.INTER_NEAREST
+    finalimg = cv2.warpAffine(finalimg, t_mat, np.shape(finalimg), flags=t_flag)
+    mask = cv2.warpAffine(mask, t_mat, np.shape(finalimg), flags=t_flag)
 
-    # FINALIZE AND RETURN OUTPUT
-    _, background = cv2.threshold(background, 127, 255, cv2.THRESH_BINARY_INV)
-    bg_color = np.random.randint(30, 200)
-    background = apply_mask(background, background, 63.5, 8.1)
+    # BACKGROUND
+    finalimg[finalimg == 0] = 63
 
-    finalimg = cv2.add(finalimg, background)
     return finalimg, mask
 
 
 def save_wire_image(voiddict, img_dir, mask_dir, file_prefix, img_idx):
-    np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
+    np.random.seed(int.from_bytes(os.urandom(4), byteorder="little"))
     img, mask = generate_superconducting_wire(voiddict)
-    img_name = os.path.join(img_dir, f"{file_prefix}-{img_idx}.jpg")
+    img_name = os.path.join(img_dir, f"{file_prefix}-{img_idx}.png")
     mask_name = os.path.join(mask_dir, f"{file_prefix}-{img_idx}.png")
-    cv2.imwrite(img_name, img)
-    cv2.imwrite(mask_name, mask)
+    status1 = cv2.imwrite(img_name, img)
+    status2 = cv2.imwrite(mask_name, mask)
 
 
-def bat(folderpath: str, voiddict: dict, N_img: int = 1):
+def generate(folderpath: str, voiddict: dict, N_img: int = 1):
     current_datetime = datetime.now()
     datestr = current_datetime.strftime("%Y-%m-%d-%H-%M-%S-%f")[:-3]
     img_dir = os.path.join(folderpath, "img")
@@ -223,8 +210,9 @@ def bat(folderpath: str, voiddict: dict, N_img: int = 1):
 
 voiddict = read_void("void/")
 
+# generate_superconducting_wire(voiddict)
+
 start = time()
-# batch_generate_wire("data/train", voiddict, 1000, 20)
-bat("test-normal/", voiddict, 8)
+generate("test-normal/", voiddict, 8)
 end = time() - start
 print(f"Time elapsed: {end} seconds")
