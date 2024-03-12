@@ -13,9 +13,11 @@ import numpy as np
 import cv2
 
 
-def apply_mask(image, mask, low, high):
+def apply_mask(image, mask, mean, std):
     shape = np.shape(image)[:2]
-    noise = np.random.randint(low, high, shape, dtype=np.uint8)
+    noise = np.random.randn(*shape) * std + mean
+    noise = np.clip(noise, 1, 254)
+    noise = noise.astype(np.uint8)
     noise = cv2.bitwise_and(noise, noise, mask=mask)
     final_image = cv2.bitwise_and(image, image, mask=cv2.bitwise_not(mask))
     final_image = cv2.add(final_image, noise)
@@ -55,7 +57,7 @@ def random_transform(imagesize, radius):
 
 def generate_superconducting_wire(voiddict: dict):
     radius = 400
-    elementsize = 28
+    elementsize = 31
     variance = 0.4
     imagesize = 1000
     nbigvoid = 70
@@ -148,7 +150,7 @@ def generate_superconducting_wire(voiddict: dict):
         )
         void_big_mask[xpos : xpos + 20, ypos : ypos + 20] = chosenvoid
     # END GENERATING BIG VOID
-
+    
     # BEGIN MASKS GENERATION
     # In total we should have 6 masks (4 generated here plus 2 void masks previously generated)
     zerosmatrix = np.zeros((imagesize, imagesize), dtype=np.uint8)
@@ -159,95 +161,51 @@ def generate_superconducting_wire(voiddict: dict):
     copper_mask = cv2.subtract(copper_mask, void_mask)
     background = cv2.fillPoly(deepcopy(zerosmatrix), coat_out, 255)
     # END MASKS GENERATION
-
+    
     # BEGIN DRAWING
-    finalimg = apply_mask(deepcopy(zerosmatrix), coat_mask, 10, 20)
-    finalimg = apply_mask(finalimg, copper_mask, 120, 190)
-    finalimg = apply_mask(finalimg, subelement_mask, 180, 220)
-    finalimg = apply_mask(finalimg, void_mask, 50, 80)
+    finalimg = apply_mask(deepcopy(zerosmatrix), coat_mask, 20, 5)
+    finalimg = apply_mask(finalimg, copper_mask, 135, 9.8)
+    finalimg = apply_mask(finalimg, subelement_mask, 200, 13)
+    finalimg = apply_mask(finalimg, void_mask, 50, 25)
     # finalimg = apply_mask(finalimg, void_big_mask, 50, 80)
 
     mask = np.stack((copper_mask, subelement_mask, void_mask), axis=-1)
     # END DRAWING
 
+
     # BEGIN TRANSLATION
     # translation_matrix = random_transform(imagesize, radius)
     rotation_angle = np.random.uniform(0, 360)
-    c = int(imagesize) / 2
+    c = int(imagesize / 2)
     translation_matrix = cv2.getRotationMatrix2D([c, c], rotation_angle, 1)
-
-    finalimg = cv2.warpAffine(finalimg, translation_matrix, np.shape(finalimg))
-    mask = cv2.warpAffine(mask, translation_matrix, np.shape(finalimg))
+    # finalimg = cv2.warpAffine(finalimg, translation_matrix, np.shape(finalimg))
+    # mask = cv2.warpAffine(mask, translation_matrix, np.shape(finalimg))
+    mask_max = np.max(mask, axis=2)
+    mask = (mask == np.expand_dims(mask_max, -1)) * 255
+    mask_white = np.expand_dims(np.sum(mask, axis=-1) == 255 * 3, -1) * 255
+    mask = mask - mask_white
     background = cv2.warpAffine(background, translation_matrix, np.shape(finalimg))
     # END TRANSLATION
 
     # FINALIZE AND RETURN OUTPUT
     _, background = cv2.threshold(background, 127, 255, cv2.THRESH_BINARY_INV)
-    bg_color = np.random.randint(0, 200)
-    background = apply_mask(background, background, bg_color, bg_color + 50)
+    bg_color = np.random.randint(30, 200)
+    background = apply_mask(background, background, 63.5, 8.1)
 
     finalimg = cv2.add(finalimg, background)
-    finalimg = cv2.blur(finalimg, (3, 3))
-
     return finalimg, mask
-    # return finalimg.flatten(), np.moveaxis(mask, -1, 0).flatten()
 
 
-def __batch_cropper(image, mask, N):
-    cropsize = 252
-
-    imagesize = np.shape(image)[0]
-    if cropsize > imagesize:
-        raise ValueError("Crop size must be smaller than image size.")
-
-    xcrop = np.random.randint(0, imagesize - cropsize, N)
-    ycrop = np.random.randint(0, imagesize - cropsize, N)
-
-    image_list = []
-    masks_list = []
-    for i in range(N):
-        xs = xcrop[i]
-        ys = ycrop[i]
-        xe = xs + cropsize
-        ye = ys + cropsize
-        pad = 44
-
-        img_crop = deepcopy(image[xs:xe, ys:ye])
-        msk_crop = deepcopy(mask[xs + pad : xe - pad, ys + pad : ye - pad, :])
-
-        image_list.append(img_crop)
-        masks_list.append(msk_crop)
-
-    return image_list, masks_list
-
-
-def batch_cropper(
-    voiddict: dict,
-    N_crop: int,
-    imgdir: str,
-    maskdir: str,
-    fileprefix: str,
-    imgidx: int,
-):
+def save_wire_image(voiddict, img_dir, mask_dir, file_prefix, img_idx):
+    np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
     img, mask = generate_superconducting_wire(voiddict)
-    image_list, masks_list = __batch_cropper(img, mask, N_crop)
-
-    pairs = zip(image_list, masks_list)
-    for i, (img, mask) in enumerate(pairs):
-        globalidx = N_crop * imgidx + i
-        imgname = os.path.join(imgdir, f"{fileprefix}-{globalidx}.png")
-        maskname = os.path.join(maskdir, f"{fileprefix}-{globalidx}.png")
-
-        cv2.imwrite(imgname, img)
-        cv2.imwrite(maskname, mask)
+    img_name = os.path.join(img_dir, f"{file_prefix}-{img_idx}.jpg")
+    mask_name = os.path.join(mask_dir, f"{file_prefix}-{img_idx}.png")
+    cv2.imwrite(img_name, img)
+    cv2.imwrite(mask_name, mask)
 
 
-def batch_generate_wire(
-    folderpath: str,
-    voiddict: dict,
-    N_img: int = 1,
-    N_crop: int = 5,
-):
+def bat(folderpath: str, voiddict: dict, N_img: int = 1):
     current_datetime = datetime.now()
     datestr = current_datetime.strftime("%Y-%m-%d-%H-%M-%S-%f")[:-3]
     img_dir = os.path.join(folderpath, "img")
@@ -257,18 +215,16 @@ def batch_generate_wire(
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
         futures = [
-            executor.submit(
-                batch_cropper, voiddict, N_crop, img_dir, mask_dir, datestr, i
-            )
+            executor.submit(save_wire_image, voiddict, img_dir, mask_dir, datestr, i)
             for i in range(N_img)
         ]
-
         concurrent.futures.wait(futures)
 
 
 voiddict = read_void("void/")
 
 start = time()
-batch_generate_wire("data/train", voiddict, 1000, 20)
+# batch_generate_wire("data/train", voiddict, 1000, 20)
+bat("test-normal/", voiddict, 8)
 end = time() - start
 print(f"Time elapsed: {end} seconds")
