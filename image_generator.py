@@ -63,8 +63,8 @@ def generate_superconducting_wire(voiddict: dict):
     elementsize = 31
     variance = 0.4
     imagesize = 1000
-    n_big_void = 70
-    n_small_void = 150
+    n_big_void = 150
+    n_small_void = 300
     small_void_weights = [1, 2, 2]
     small_void_sizes = [15, 10, 7]
     zmat = np.zeros((imagesize, imagesize), dtype=np.uint8)
@@ -85,9 +85,9 @@ def generate_superconducting_wire(voiddict: dict):
     # ERROR CHECKING
     fillrate = np.sum(copper_mask > 0)
     if fillrate < 0.01:
-        raise ValueError("Copper is too small. Increase wire radius.")
+        raise ValueError("Cable is too small. Increase wire radius.")
     elif fillrate < 0.05:
-        warnings.warn("Copper fillrate is lower than 5%.", UserWarning)
+        warnings.warn("Cable fillrate is lower than 5%.", UserWarning)
 
     # GENERATING VOIDS
     s = np.sum(small_void_weights)
@@ -99,35 +99,40 @@ def generate_superconducting_wire(voiddict: dict):
         spread_void(void_group, N_void, copper_mask, void_mask)
     spread_void(voiddict[20], n_big_void, copper_inner_mask, void_mask)
 
-    # FINALIZING MASKS
-    subelement_mask = np.subtract(subelement_mask, void_mask)
-    copper_mask = np.subtract(copper_mask, void_mask)
-    mask = np.stack((copper_mask, subelement_mask, void_mask), axis=-1)
-
-    # COLORING
-    finalimg = deepcopy(zmat)
-    finalimg[coat_mask == 255] = 20
-    finalimg[copper_mask == 255] = 135
-    finalimg[subelement_mask == 255] = 200
-    finalimg[void_mask == 255] = 50
-
-    # ROTATION
+    # PREPARING MASKS
     rotation_angle = np.random.uniform(0, 360)
     c = int(imagesize / 2)
     t_mat = cv2.getRotationMatrix2D([c, c], rotation_angle, 1)
     t_flag = cv2.INTER_NEAREST
-    finalimg = cv2.warpAffine(finalimg, t_mat, np.shape(finalimg), flags=t_flag)
-    mask = cv2.warpAffine(mask, t_mat, np.shape(finalimg), flags=t_flag)
 
-    # BACKGROUND
+    cv2.warpAffine(coat_mask, t_mat, np.shape(zmat), coat_mask, t_flag)
+    cv2.warpAffine(subelement_mask, t_mat, np.shape(zmat), subelement_mask, t_flag)
+    cv2.warpAffine(copper_mask, t_mat, np.shape(zmat), copper_mask, t_flag)
+    cv2.warpAffine(void_mask, t_mat, np.shape(zmat), void_mask, t_flag)
+
+    # COLORING
+    finalimg = deepcopy(zmat)
+    finalimg[coat_mask == 255] = 40
+    finalimg[copper_mask == 255] = 150
+    finalimg[subelement_mask == 255] = 200
+    cv2.GaussianBlur(finalimg, (9, 9), 500, finalimg, 50)
+
+    finalimg[void_mask == 255] = 50
     finalimg[finalimg == 0] = 63
-
-    # BLUR
-    cv2.GaussianBlur(finalimg, (5, 5), 50, finalimg, 50)
+    cv2.GaussianBlur(finalimg, (3, 3), 500, finalimg, 50)
 
     # NOISE
-    noise = np.random.normal(0, 0.05 * finalimg + 4, (imagesize, imagesize))
-    finalimg = np.subtract(finalimg, noise).astype(np.uint8)
+    noise = np.random.normal(0, 0.04 * finalimg + 4, (imagesize, imagesize))
+    finalimg = np.subtract(finalimg, noise)
+    finalimg = np.clip(finalimg, 0 ,255).astype(np.uint8)
+    print(np.shape(finalimg))
+    print(finalimg.dtype)
+
+    # FINALIZING MASKS
+    subelement_mask[void_mask > 0] = 0
+    copper_mask[void_mask > 0] = 0
+    void_mask[void_mask > 0] = 255
+    mask = np.stack((copper_mask, subelement_mask, void_mask), axis=-1)
 
     return finalimg, mask
 
@@ -154,7 +159,7 @@ def generate(folderpath: str, voiddict: dict, N_img: int = 1):
             executor.submit(save_wire_image, voiddict, img_dir, mask_dir, datestr, i)
             for i in range(N_img)
         ]
-        concurrent.futures.wait(futures)
+        # concurrent.futures.wait(futures)
 
     img, mask = generate_superconducting_wire(voiddict)
     img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
@@ -163,10 +168,9 @@ def generate(folderpath: str, voiddict: dict, N_img: int = 1):
     imageio.mimsave(animation_name, [img, mask], fps=0.5, format="GIF", loop=0)
 
 
-voiddict = read_void("void/")
-
-# generate_superconducting_wire(voiddict)
-
-start = time()
-generate("test-normal/", voiddict, 5)
-print(f"Time elapsed: {time() - start} seconds")
+if __name__ == "__main__":
+    voiddict = read_void("void/")
+    # generate_superconducting_wire(voiddict)
+    start = time()
+    generate("test-normal/", voiddict, 5)
+    print(f"Time elapsed: {time() - start} seconds")
