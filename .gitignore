@@ -8,6 +8,7 @@ venv/
 images/
 *.png
 *.jpg
+*.gif
 __*__
 *.tar.gz
 *.pth.tar

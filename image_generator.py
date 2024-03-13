@@ -3,6 +3,7 @@ from copy import deepcopy
 import poly_generator as pg
 import pyarrow as pa
 import pyarrow.parquet as pq
+import imageio
 import glob
 import os
 from time import time
@@ -125,15 +126,14 @@ def generate_superconducting_wire(voiddict: dict):
     cv2.GaussianBlur(finalimg, (5, 5), 50, finalimg, 50)
 
     # NOISE
-    noise = np.random.normal(0, 0.03 * finalimg + 8, (imagesize, imagesize))
-    finalimg = np.subtract(finalimg, noise)
+    noise = np.random.normal(0, 0.05 * finalimg + 4, (imagesize, imagesize))
+    finalimg = np.subtract(finalimg, noise).astype(np.uint8)
 
     return finalimg, mask
 
 
 def save_wire_image(voiddict, img_dir, mask_dir, file_prefix, img_idx):
-    # np.random.seed(int.from_bytes(os.urandom(4), byteorder="little"))
-    np.random.seed(0)
+    np.random.seed(int.from_bytes(os.urandom(4), byteorder="little"))
     img, mask = generate_superconducting_wire(voiddict)
     img_name = os.path.join(img_dir, f"{file_prefix}-{img_idx}.jpg")
     mask_name = os.path.join(mask_dir, f"{file_prefix}-{img_idx}.png")
@@ -156,11 +156,17 @@ def generate(folderpath: str, voiddict: dict, N_img: int = 1):
         ]
         concurrent.futures.wait(futures)
 
+    img, mask = generate_superconducting_wire(voiddict)
+    img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
+    animation_name = os.path.join(folderpath, f"{datestr}.gif")
+    imageio.mimsave(animation_name, [img, mask], fps=0.5, format="GIF", loop=0)
+
 
 voiddict = read_void("void/")
 
 # generate_superconducting_wire(voiddict)
 
 start = time()
-generate("test-normal/", voiddict, 1)
+generate("test-normal/", voiddict, 5)
 print(f"Time elapsed: {time() - start} seconds")
