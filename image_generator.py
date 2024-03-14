@@ -59,11 +59,12 @@ def read_void(path: str):
 
 
 def generate_superconducting_wire(voiddict: dict):
-    radius = 400
-    elementsize = 31
+    radius = np.random.uniform(400, 450)
+    elementsize = (radius - 400) * 6 / 50 + 27
+    elementsize = np.random.uniform(elementsize, elementsize + 6)
     variance = 0.4
     imagesize = 1000
-    n_big_void = 150
+    n_big_void = 200
     n_small_void = 300
     small_void_weights = [1, 2, 2]
     small_void_sizes = [15, 10, 7]
@@ -108,6 +109,7 @@ def generate_superconducting_wire(voiddict: dict):
     cv2.warpAffine(coat_mask, t_mat, np.shape(zmat), coat_mask, t_flag)
     cv2.warpAffine(subelement_mask, t_mat, np.shape(zmat), subelement_mask, t_flag)
     cv2.warpAffine(copper_mask, t_mat, np.shape(zmat), copper_mask, t_flag)
+    cv2.warpAffine(copper_inner_mask, t_mat, np.shape(zmat), copper_inner_mask, t_flag)
     cv2.warpAffine(void_mask, t_mat, np.shape(zmat), void_mask, t_flag)
 
     # COLORING
@@ -115,18 +117,30 @@ def generate_superconducting_wire(voiddict: dict):
     finalimg[coat_mask == 255] = 40
     finalimg[copper_mask == 255] = 150
     finalimg[subelement_mask == 255] = 200
+
+    kerneld = np.ones((4, 4), np.uint8)
+    pseudocopper_mask = cv2.dilate(void_mask, kerneld, cv2.BORDER_REFLECT)
+    pseudocopper_mask = np.subtract(pseudocopper_mask, void_mask)
+    pseudocopper_mask = cv2.bitwise_and(pseudocopper_mask, copper_inner_mask)
+    finalimg[pseudocopper_mask == 255] = 200
+
     cv2.GaussianBlur(finalimg, (9, 9), 500, finalimg, 50)
 
-    finalimg[void_mask == 255] = 50
+    finalimg[void_mask == 255] = 70
+    kernel1 = np.ones((3, 3), np.uint8)
+    void_mask_in1 = cv2.erode(void_mask, kernel1, cv2.BORDER_REFLECT)
+    finalimg[void_mask_in1 == 255] = 80
+    kernel2 = np.ones((6, 6), np.uint8)
+    void_mask_in2 = cv2.erode(void_mask, kernel2, cv2.BORDER_REFLECT)
+    finalimg[void_mask_in2 == 255] = 90
     finalimg[finalimg == 0] = 63
+
     cv2.GaussianBlur(finalimg, (3, 3), 500, finalimg, 50)
 
     # NOISE
-    noise = np.random.normal(0, 0.04 * finalimg + 4, (imagesize, imagesize))
+    noise = np.random.normal(0, 0.04 * finalimg + 1, (imagesize, imagesize))
     finalimg = np.subtract(finalimg, noise)
-    finalimg = np.clip(finalimg, 0 ,255).astype(np.uint8)
-    print(np.shape(finalimg))
-    print(finalimg.dtype)
+    finalimg = np.clip(finalimg, 0, 255).astype(np.uint8)
 
     # FINALIZING MASKS
     subelement_mask[void_mask > 0] = 0
@@ -172,5 +186,5 @@ if __name__ == "__main__":
     voiddict = read_void("void/")
     # generate_superconducting_wire(voiddict)
     start = time()
-    generate("test-normal/", voiddict, 5)
+    generate("test-normal/", voiddict, 20)
     print(f"Time elapsed: {time() - start} seconds")

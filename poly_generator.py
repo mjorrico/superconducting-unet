@@ -51,7 +51,7 @@ def generate_hex_centroids(hex_width: float, origin: np.ndarray, variance: float
 
     inner = []
     for i, vertex in enumerate(outer):
-        shift_coeff = np.random.uniform(0.55, 0.65, (len(vertex), 1))
+        shift_coeff = np.random.uniform(0.45, 0.55, (len(vertex), 1))
         inner_vertex = (vertex - centroids[i]) * shift_coeff + centroids[i]
         inner.append(inner_vertex)
 
@@ -67,7 +67,7 @@ def generate_coating(rad: float, origin: np.ndarray):
 
     coat_base = np.ones((N, 1), np.float32)
     coat_inner_rad = coat_base * (rad + np.random.randint(0, 5, (N, 1)))
-    coat_outer_rad = coat_inner_rad + np.random.randint(1, 2, (N, 1))
+    coat_outer_rad = coat_inner_rad# + np.random.randint(0, 1, (N, 1))
 
     coat_inner_poly = origin + coat_inner_rad * coat_components
     coat_outer_poly = origin + coat_outer_rad * coat_components
