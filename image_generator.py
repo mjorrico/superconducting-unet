@@ -1,8 +1,7 @@
 from datetime import datetime
 from copy import deepcopy
 import poly_generator as pg
-import pyarrow as pa
-import pyarrow.parquet as pq
+import pickle
 import imageio
 import glob
 import os
@@ -47,15 +46,20 @@ def spread_void(void_group, n_void, copper_mask, void_mask, n_trial=300):
 
 
 def read_void(path: str):
-    void = {}
-    for file in glob.glob(os.path.join(path, "void*.parquet")):
-        size = int((file.split("-")[-1]).split(".")[0])
-        vraw = pq.read_table(file)
-        void[size] = np.stack(
-            [np.array(vraw[file]).reshape(size, size) for file in vraw.column_names],
-            axis=0,
-        )
-    return void
+    filepath = os.path.join(path, "void*.pickle")
+    files = glob.glob(filepath)
+
+    if len(files) == 0:
+        raise RuntimeError
+
+    outputdict = {}
+    for file in files:
+        with open(file, "rb") as f:
+            arr = pickle.load(f)
+            size = np.shape(arr)[1]
+            outputdict[size] = arr
+
+    return outputdict
 
 
 def generate_superconducting_wire(voiddict: dict):
@@ -114,9 +118,21 @@ def generate_superconducting_wire(voiddict: dict):
 
     # COLORING
     finalimg = deepcopy(zmat)
-    finalimg[coat_mask == 255] = 40
     finalimg[copper_mask == 255] = 150
     finalimg[subelement_mask == 255] = 200
+
+    # surface = np.random.uniform(size=(imagesize, imagesize))
+    # surfaceblur = 10
+    # cv2.GaussianBlur(surface, (0, 0), surfaceblur, surface, surfaceblur)
+    # minval = np.min(surface)
+    # maxval = np.max(surface)
+    # rangeval = maxval - minval
+    # surface = (surface - minval) / rangeval * 2 - 1
+    # surface *= 30
+    # surface = (150 - surface).astype(np.uint8)
+    # cv2.subtract(finalimg, copper_mask, finalimg)
+    # surface = cv2.bitwise_and(surface, surface, mask=copper_mask)
+    # cv2.add(finalimg, surface, finalimg)
 
     kerneld = np.ones((4, 4), np.uint8)
     pseudocopper_mask = cv2.dilate(void_mask, kerneld, cv2.BORDER_REFLECT)
@@ -133,11 +149,13 @@ def generate_superconducting_wire(voiddict: dict):
     kernel2 = np.ones((6, 6), np.uint8)
     void_mask_in2 = cv2.erode(void_mask, kernel2, cv2.BORDER_REFLECT)
     finalimg[void_mask_in2 == 255] = 90
+
+    finalimg[coat_mask == 255] = 50
     finalimg[finalimg == 0] = 63
 
-    cv2.GaussianBlur(finalimg, (3, 3), 500, finalimg, 50)
+    cv2.GaussianBlur(finalimg, (3, 3), sigmaX=50, dst=finalimg)
 
-    # NOISE
+    # # NOISE
     noise = np.random.normal(0, 0.04 * finalimg + 1, (imagesize, imagesize))
     finalimg = np.subtract(finalimg, noise)
     finalimg = np.clip(finalimg, 0, 255).astype(np.uint8)
@@ -158,7 +176,8 @@ def save_wire_image(voiddict, img_dir, mask_dir, file_prefix, img_idx):
     mask_name = os.path.join(mask_dir, f"{file_prefix}-{img_idx}.png")
     status1 = cv2.imwrite(img_name, img)
     status2 = cv2.imwrite(mask_name, mask)
-
+    if img_idx % 1000 == 0:
+        print(f"Image {img_idx} saved!")
 
 def generate(folderpath: str, voiddict: dict, N_img: int = 1):
     current_datetime = datetime.now()
@@ -186,5 +205,5 @@ if __name__ == "__main__":
     voiddict = read_void("void/")
     # generate_superconducting_wire(voiddict)
     start = time()
-    generate("test-normal/", voiddict, 20)
+    generate("test-normal/", voiddict, 100)
     print(f"Time elapsed: {time() - start} seconds")

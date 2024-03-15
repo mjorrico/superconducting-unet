@@ -67,7 +67,7 @@ def generate_coating(rad: float, origin: np.ndarray):
 
     coat_base = np.ones((N, 1), np.float32)
     coat_inner_rad = coat_base * (rad + np.random.randint(0, 5, (N, 1)))
-    coat_outer_rad = coat_inner_rad# + np.random.randint(0, 1, (N, 1))
+    coat_outer_rad = coat_inner_rad + np.random.randint(1, 2, (N, 1))
 
     coat_inner_poly = origin + coat_inner_rad * coat_components
     coat_outer_poly = origin + coat_outer_rad * coat_components

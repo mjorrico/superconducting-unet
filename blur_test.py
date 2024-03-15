@@ -1,35 +1,25 @@
-import cv2
+import pyarrow as pa
+import pyarrow.parquet as pq
+import glob
+import os
 import numpy as np
+import pickle
+import cv2
 
-a = np.zeros((4, 3, 2))
-count = 0
-for i in range(4):
-    for j in range(3):
-        for k in range(2):
-            a[i, j, k] = count
-            count += 1
+def getrange(arr):
+    return np.min(arr), np.max(arr)
 
-b = np.zeros((4, 1, 2))
-# b = np.zeros((4, 2))
-count = 0
-for i in range(4):
-    for j in range(1):
-        for k in range(2):
-            b[i, j, k] = count
-            count += 2
 
-print(a[:2])
-print("-----")
-print(b)
-print("-----")
-
-c = a - b
-print(c[:2])
-
-print("-----")
-
-t = np.random.randint(1, 3, (4, 3)).reshape(4, 3, 1)
-print(t[:2])
-print("-----")
-d = a * t
-print(d[:2])
+surfaces = []
+for _ in range(500):
+    img = np.random.uniform(0, 255, (1000, 1000))
+    blur = np.random.uniform(20, 50)
+    cv2.GaussianBlur(img, (0, 0), blur, img, blur)
+    minval, maxval = getrange(img)
+    img = (img - minval) / (maxval - minval) * 255
+    img = img.astype(np.uint8)
+    cv2.imwrite("test.png", img)
+    tast = img / 6 + (135 - 127 / 6)
+    cv2.imwrite("tast.png", tast)
+    print(blur, np.mean(img), np.mean(tast), getrange(tast))
+    break
