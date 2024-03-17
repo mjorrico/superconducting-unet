@@ -1,209 +1,254 @@
-from datetime import datetime
+import warnings, imageio, hashlib, pickle, glob, cv2, os
 from copy import deepcopy
 import poly_generator as pg
-import pickle
-import imageio
-import glob
-import os
 from time import time
 
 import concurrent.futures
-import warnings
 import numpy as np
-import cv2
 
 
-def spread_void(void_group, n_void, copper_mask, void_mask, n_trial=300):
-    imagesize = len(copper_mask)
-    for _ in range(n_void):
-        is_succeed = False
-        for _ in range(n_trial):  # multiple attempts to insert void
-            xpos, ypos = np.random.randint(0, imagesize - 20, 2)
-            xcheck = xpos + 10
-            ycheck = ypos + 10
+class WireGenerator:
+    def __init__(self, void_path):
+        self.void_dict = self.__read_void(void_path)
 
-            if copper_mask[xcheck, ycheck] > 0:
-                is_succeed = True
+        self.img_size = 1000
+        self.variance = 0.4
+        self.largevoid_count = 200
+        self.smallvoid_count = 300
+        self.smallvoid_sizes = [15, 10, 7]
+        self.smallvoid_weight = [1, 2, 2]
+        self.zmat = np.zeros((self.img_size, self.img_size), dtype=np.uint8)
+
+        x = np.arange(self.img_size, step=1)
+        y = np.arange(self.img_size, step=1)
+        c = (self.img_size - 1) / 2
+        self.gridx, self.gridy = np.meshgrid(x, y)
+        self.dist_array = np.sqrt((self.gridx - c) ** 2 + (self.gridy - c) ** 2)
+
+    def __read_void(self, void_path):
+        filepath = os.path.join(void_path, "void_*.pickle")
+        files = glob.glob(filepath)
+
+        if len(files) == 0:
+            raise RuntimeError(
+                'Void stock photo is not found. Filename format has to be "void_*.pickle"'
+            )
+
+        outputdict = {}
+        for file in files:
+            with open(file, "rb") as f:
+                arr = pickle.load(f)
+                size = np.shape(arr)[1]
+                outputdict[size] = arr
+
+        return outputdict
+
+    def __random__hash(self, len):
+        random_data = os.urandom(16)
+        hash_object = hashlib.sha256()
+        hash_object.update(random_data)
+        random_hash = hash_object.hexdigest()
+        return random_hash[:len]
+
+    def get_animation(self, save_path, file_name):
+        img, msk = self.superwire_gen()
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        msk = cv2.cvtColor(msk, cv2.COLOR_BGR2RGB)
+        animation_name = os.path.join(save_path, f"{file_name}.gif")
+        cv2.imwrite("img.png", img)
+        cv2.imwrite("msk.png", msk)
+        imageio.mimsave(animation_name, [img, msk], fps=0.5, format="GIF", loop=0)
+
+    def _image_saver(self, save_path, file_prefix, img_idx):
+        img_idx = str(img_idx).zfill(5)
+        np.random.seed(int.from_bytes(os.urandom(4), byteorder="little"))
+        img_path = os.path.join(save_path, "img", f"{file_prefix}-{img_idx}.jpg")
+        msk_path = os.path.join(save_path, "mask", f"{file_prefix}-{img_idx}.png")
+        img, msk = self.superwire_gen()
+        status_img = cv2.imwrite(img_path, img)
+        status_msk = cv2.imwrite(msk_path, msk)
+
+        if img_idx % 1000 == 999:
+            print(f"Image {img_idx} saved!")
+
+    def __check_copper_size(self, copper_mask):
+        fillrate = np.sum(copper_mask > 0)
+        if fillrate < 0.01:
+            raise ValueError("Cable is too small. Increase wire radius.")
+        elif fillrate < 0.05:
+            warnings.warn("Cable fillrate is lower than 5%.", UserWarning)
+
+    def __spread_void(self, void_group, n_void, copper_mask, void_mask, n_trial=300):
+        void_count, void_size, _ = np.shape(void_group)
+
+        for _ in range(n_void):
+            is_succeed = False
+            for _ in range(n_trial):  # multiple attempts to insert void
+                xpos, ypos = np.random.randint(0, self.img_size - void_size, 2)
+                xcheck = xpos + int(void_size / 2)
+                ycheck = ypos + int(void_size / 2)
+
+                if copper_mask[xcheck, ycheck] > 0:
+                    is_succeed = True
+                    break
+
+            if not is_succeed:
                 break
 
-        if not is_succeed:
-            break
+            chosen_void = deepcopy(void_group[np.random.randint(0, void_count)])
+            x1, y1 = xpos, ypos
+            x2, y2 = xpos + void_size, ypos + void_size
+            cv2.bitwise_and(chosen_void, copper_mask[x1:x2, y1:y2], chosen_void)
+            cv2.bitwise_or(chosen_void, void_mask[x1:x2, y1:y2], chosen_void)
+            void_mask[x1:x2, y1:y2] = chosen_void
 
-        chosen_void = deepcopy(void_group[np.random.randint(0, len(void_group))])
-        void_size = len(chosen_void)
-        cv2.bitwise_and(
-            chosen_void,
-            copper_mask[xpos : xpos + void_size, ypos : ypos + void_size],
-            chosen_void,
+    def _get_cowskin(self, color, color_range):
+        blur = np.random.uniform(10, 50)
+        skin = np.random.uniform(0, 255, (1000, 1000))
+        cv2.GaussianBlur(skin, (0, 0), blur, skin, blur)
+        minval, maxval = np.min(skin), np.max(skin)
+        rangeval = maxval - minval
+        skin = (skin - minval) * (color_range / rangeval)
+        skin = skin - np.mean(skin) + color
+        skin = np.clip(skin, 0, 255)
+
+        return skin.astype(np.uint8)
+
+    def apply_cowmask(self, image, mask, color, color_range):
+        skin = self._get_cowskin(color, color_range)
+        image = np.where(mask > 0, skin, image)
+        return image
+
+    def _interference_base(self):
+        u, v = np.random.uniform(0.2, 0.8, 2)
+        a = np.random.uniform(0.01, 0.012)
+        c = np.random.uniform(100, 250)
+        f = lambda x: np.sin(u * x) * np.cos(v * x)
+        s = lambda x: np.clip(np.sin(a * (x - c)), 0, None)
+        return f(self.dist_array) * s(self.dist_array)
+
+    def _interference_mask(self):
+        c = (self.img_size - 1) / 2
+        angles = np.arctan2(
+            self.gridx.astype(np.float32) - c, self.gridy.astype(np.float32) - c
         )
-        cv2.bitwise_or(
-            chosen_void,
-            void_mask[xpos : xpos + void_size, ypos : ypos + void_size],
-            chosen_void,
+        u, v = np.random.uniform(4, 11, 2)
+        f = lambda x: (np.sin(u * x) * np.cos(v * x) + 1) / 2
+        return f(angles)
+
+    def interference(self, img):
+        amplitude = np.random.uniform(10, 30)
+        intmask = self._interference_base() * self._interference_mask() * amplitude
+        img = np.clip(img + intmask, 0, 255)
+        return img.astype(np.uint8)
+
+    def superwire_gen(self):
+        # MASKS GENERATION
+        radius = np.random.uniform(400, 450)
+        element_size = (radius - 400) * 6 / 50 + 27 + np.random.uniform(0, 6)
+        coat_in, coat_out, hex_in, hex_out = pg.generate(
+            radius, element_size, self.variance, self.img_size
+        )
+        coat_mask = cv2.fillPoly(deepcopy(self.zmat), coat_out + coat_in, 255)
+        elem_mask = cv2.fillPoly(deepcopy(self.zmat), hex_out + hex_in, 255)
+        copp_mask = cv2.fillPoly(deepcopy(self.zmat), coat_in + hex_out + hex_in, 255)
+        copp_mask_in = cv2.fillPoly(deepcopy(self.zmat), hex_in, 255)
+        void_mask = deepcopy(self.zmat)
+
+        # ERROR CHECKING
+        self.__check_copper_size(copp_mask)
+
+        # GENERATING VOIDS
+        s = np.sum(self.smallvoid_weight)
+        counts = np.array(self.smallvoid_weight) / s * self.smallvoid_count
+        counts = counts.astype(np.int32)
+        for size, vcount in zip(self.smallvoid_sizes, counts):
+            void_group = self.void_dict[size]
+            self.__spread_void(void_group, vcount, copp_mask, void_mask)
+        self.__spread_void(
+            self.void_dict[20], self.largevoid_count, copp_mask_in, void_mask
         )
 
-        void_mask[xpos : xpos + void_size, ypos : ypos + void_size] = chosen_void
+        # PREPARING MASKS
+        rotation_angle = np.random.uniform(0, 360)
+        c = int(self.img_size / 2)
+        t_mat = cv2.getRotationMatrix2D([c, c], rotation_angle, 1)
+        t_flag = cv2.INTER_NEAREST
 
+        cv2.warpAffine(coat_mask, t_mat, np.shape(self.zmat), coat_mask, t_flag)
+        cv2.warpAffine(elem_mask, t_mat, np.shape(self.zmat), elem_mask, t_flag)
+        cv2.warpAffine(copp_mask, t_mat, np.shape(self.zmat), copp_mask, t_flag)
+        cv2.warpAffine(copp_mask_in, t_mat, np.shape(self.zmat), copp_mask_in, t_flag)
+        cv2.warpAffine(void_mask, t_mat, np.shape(self.zmat), void_mask, t_flag)
 
-def read_void(path: str):
-    filepath = os.path.join(path, "void*.pickle")
-    files = glob.glob(filepath)
+        kerneld = np.ones((4, 4), np.uint8)
+        pseudoelem_mask = cv2.dilate(void_mask, kerneld, cv2.BORDER_REFLECT)
+        pseudoelem_mask = np.subtract(pseudoelem_mask, void_mask)
+        pseudoelem_mask = cv2.bitwise_and(pseudoelem_mask, copp_mask_in)
 
-    if len(files) == 0:
-        raise RuntimeError
+        kernel1 = np.ones((3, 3), np.uint8)
+        void_mask_in1 = cv2.erode(void_mask, kernel1, cv2.BORDER_REFLECT)
 
-    outputdict = {}
-    for file in files:
-        with open(file, "rb") as f:
-            arr = pickle.load(f)
-            size = np.shape(arr)[1]
-            outputdict[size] = arr
+        kernel2 = np.ones((6, 6), np.uint8)
+        void_mask_in2 = cv2.erode(void_mask, kernel2, cv2.BORDER_REFLECT)
 
-    return outputdict
+        # COLORING
+        finalimg = deepcopy(self.zmat)
+        finalimg = self.apply_cowmask(finalimg, copp_mask, 150, 60)
+        finalimg[elem_mask == 255] = 200
+        finalimg[pseudoelem_mask == 255] = 200
 
+        cv2.GaussianBlur(finalimg, (9, 9), sigmaX=50, dst=finalimg)
 
-def generate_superconducting_wire(voiddict: dict):
-    radius = np.random.uniform(400, 450)
-    elementsize = (radius - 400) * 6 / 50 + 27
-    elementsize = np.random.uniform(elementsize, elementsize + 6)
-    variance = 0.4
-    imagesize = 1000
-    n_big_void = 200
-    n_small_void = 300
-    small_void_weights = [1, 2, 2]
-    small_void_sizes = [15, 10, 7]
-    zmat = np.zeros((imagesize, imagesize), dtype=np.uint8)
+        finalimg[void_mask == 255] = 70
+        finalimg[void_mask_in1 == 255] = 80
+        finalimg[void_mask_in2 == 255] = 90
 
-    # MASKS GENERATION
-    coat_in, coat_out, hexagon_in, hexagon_out = pg.generate(
-        radius,
-        elementsize,
-        variance,
-        imagesize,
-    )
-    coat_mask = cv2.fillPoly(deepcopy(zmat), coat_out + coat_in, 255)
-    subelement_mask = cv2.fillPoly(deepcopy(zmat), hexagon_out + hexagon_in, 255)
-    copper_mask = cv2.fillPoly(deepcopy(zmat), coat_in + hexagon_out + hexagon_in, 255)
-    copper_inner_mask = cv2.fillPoly(deepcopy(zmat), hexagon_in, 255)
-    void_mask = deepcopy(zmat)
+        finalimg[coat_mask == 255] = 50
+        finalimg[finalimg == 0] = 63
 
-    # ERROR CHECKING
-    fillrate = np.sum(copper_mask > 0)
-    if fillrate < 0.01:
-        raise ValueError("Cable is too small. Increase wire radius.")
-    elif fillrate < 0.05:
-        warnings.warn("Cable fillrate is lower than 5%.", UserWarning)
+        cv2.GaussianBlur(finalimg, (3, 3), sigmaX=50, dst=finalimg)
 
-    # GENERATING VOIDS
-    s = np.sum(small_void_weights)
-    N_small_voids = np.array(small_void_weights) / s * n_small_void
-    N_small_voids = N_small_voids.astype(np.int32)
+        # NOISE
+        noise = np.random.normal(0, 0.04 * finalimg + 1, (self.img_size, self.img_size))
+        finalimg = np.subtract(finalimg, noise)
+        finalimg = np.clip(finalimg, 0, 255).astype(np.uint8)
 
-    for size, N_void in zip(small_void_sizes, N_small_voids):
-        void_group = voiddict[size]
-        spread_void(void_group, N_void, copper_mask, void_mask)
-    spread_void(voiddict[20], n_big_void, copper_inner_mask, void_mask)
+        # INTERFERENCE
+        if np.random.rand() < 0.5:
+            finalimg = self.interference(finalimg)
 
-    # PREPARING MASKS
-    rotation_angle = np.random.uniform(0, 360)
-    c = int(imagesize / 2)
-    t_mat = cv2.getRotationMatrix2D([c, c], rotation_angle, 1)
-    t_flag = cv2.INTER_NEAREST
+        # FINALIZING MASKS
+        elem_mask[void_mask > 0] = 0
+        copp_mask[void_mask > 0] = 0
+        void_mask[void_mask > 0] = 255
+        mask = np.stack((copp_mask, elem_mask, void_mask), axis=-1)
 
-    cv2.warpAffine(coat_mask, t_mat, np.shape(zmat), coat_mask, t_flag)
-    cv2.warpAffine(subelement_mask, t_mat, np.shape(zmat), subelement_mask, t_flag)
-    cv2.warpAffine(copper_mask, t_mat, np.shape(zmat), copper_mask, t_flag)
-    cv2.warpAffine(copper_inner_mask, t_mat, np.shape(zmat), copper_inner_mask, t_flag)
-    cv2.warpAffine(void_mask, t_mat, np.shape(zmat), void_mask, t_flag)
+        return finalimg, mask
 
-    # COLORING
-    finalimg = deepcopy(zmat)
-    finalimg[copper_mask == 255] = 150
-    finalimg[subelement_mask == 255] = 200
+    def generate(self, save_path, N):
+        img_dir = os.path.join(save_path, "img")
+        msk_dir = os.path.join(save_path, "mask")
+        os.makedirs(img_dir, exist_ok=True)
+        os.makedirs(msk_dir, exist_ok=True)
+        file_prefix = self.__random__hash(10)
+        thread_input = [save_path, file_prefix]
 
-    # surface = np.random.uniform(size=(imagesize, imagesize))
-    # surfaceblur = 10
-    # cv2.GaussianBlur(surface, (0, 0), surfaceblur, surface, surfaceblur)
-    # minval = np.min(surface)
-    # maxval = np.max(surface)
-    # rangeval = maxval - minval
-    # surface = (surface - minval) / rangeval * 2 - 1
-    # surface *= 30
-    # surface = (150 - surface).astype(np.uint8)
-    # cv2.subtract(finalimg, copper_mask, finalimg)
-    # surface = cv2.bitwise_and(surface, surface, mask=copper_mask)
-    # cv2.add(finalimg, surface, finalimg)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=8) as e:
+            futures = [
+                e.submit(self._image_saver, save_path, file_prefix, i) for i in range(N)
+            ]
 
-    kerneld = np.ones((4, 4), np.uint8)
-    pseudocopper_mask = cv2.dilate(void_mask, kerneld, cv2.BORDER_REFLECT)
-    pseudocopper_mask = np.subtract(pseudocopper_mask, void_mask)
-    pseudocopper_mask = cv2.bitwise_and(pseudocopper_mask, copper_inner_mask)
-    finalimg[pseudocopper_mask == 255] = 200
-
-    cv2.GaussianBlur(finalimg, (9, 9), 500, finalimg, 50)
-
-    finalimg[void_mask == 255] = 70
-    kernel1 = np.ones((3, 3), np.uint8)
-    void_mask_in1 = cv2.erode(void_mask, kernel1, cv2.BORDER_REFLECT)
-    finalimg[void_mask_in1 == 255] = 80
-    kernel2 = np.ones((6, 6), np.uint8)
-    void_mask_in2 = cv2.erode(void_mask, kernel2, cv2.BORDER_REFLECT)
-    finalimg[void_mask_in2 == 255] = 90
-
-    finalimg[coat_mask == 255] = 50
-    finalimg[finalimg == 0] = 63
-
-    cv2.GaussianBlur(finalimg, (3, 3), sigmaX=50, dst=finalimg)
-
-    # # NOISE
-    noise = np.random.normal(0, 0.04 * finalimg + 1, (imagesize, imagesize))
-    finalimg = np.subtract(finalimg, noise)
-    finalimg = np.clip(finalimg, 0, 255).astype(np.uint8)
-
-    # FINALIZING MASKS
-    subelement_mask[void_mask > 0] = 0
-    copper_mask[void_mask > 0] = 0
-    void_mask[void_mask > 0] = 255
-    mask = np.stack((copper_mask, subelement_mask, void_mask), axis=-1)
-
-    return finalimg, mask
-
-
-def save_wire_image(voiddict, img_dir, mask_dir, file_prefix, img_idx):
-    np.random.seed(int.from_bytes(os.urandom(4), byteorder="little"))
-    img, mask = generate_superconducting_wire(voiddict)
-    img_name = os.path.join(img_dir, f"{file_prefix}-{img_idx}.jpg")
-    mask_name = os.path.join(mask_dir, f"{file_prefix}-{img_idx}.png")
-    status1 = cv2.imwrite(img_name, img)
-    status2 = cv2.imwrite(mask_name, mask)
-    if img_idx % 1000 == 0:
-        print(f"Image {img_idx} saved!")
-
-def generate(folderpath: str, voiddict: dict, N_img: int = 1):
-    current_datetime = datetime.now()
-    datestr = current_datetime.strftime("%Y-%m-%d-%H-%M-%S-%f")[:-3]
-    img_dir = os.path.join(folderpath, "img")
-    mask_dir = os.path.join(folderpath, "mask")
-    os.makedirs(img_dir, exist_ok=True)
-    os.makedirs(mask_dir, exist_ok=True)
-
-    with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
-        futures = [
-            executor.submit(save_wire_image, voiddict, img_dir, mask_dir, datestr, i)
-            for i in range(N_img)
-        ]
-        # concurrent.futures.wait(futures)
-
-    img, mask = generate_superconducting_wire(voiddict)
-    img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
-    animation_name = os.path.join(folderpath, f"{datestr}.gif")
-    imageio.mimsave(animation_name, [img, mask], fps=0.5, format="GIF", loop=0)
+        self.get_animation(save_path, file_prefix)
 
 
 if __name__ == "__main__":
-    voiddict = read_void("void/")
-    # generate_superconducting_wire(voiddict)
+    gen = WireGenerator("void/")
+
+    N = 100
     start = time()
-    generate("test-normal/", voiddict, 100)
-    print(f"Time elapsed: {time() - start} seconds")
+    gen.generate("output", N)
+    stop = time() - start
+    print(
+        f"Time elapsed: {np.round(stop, 3)} seconds ({np.round(stop / N, 3)} seconds per image)"
+    )
