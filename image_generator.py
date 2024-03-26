@@ -245,10 +245,11 @@ class WireGenerator:
 if __name__ == "__main__":
     gen = WireGenerator("void/")
 
-    N = 100
+    N = 10000
     start = time()
     gen.generate("output", N)
     stop = time() - start
     print(
         f"Time elapsed: {np.round(stop, 3)} seconds ({np.round(stop / N, 3)} seconds per image)"
     )
+    

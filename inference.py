@@ -8,8 +8,9 @@ from torch.utils.data import DataLoader
 
 
 model = WireUNet(in_channels=1, out_channels=4, features=[16, 32, 64, 128])
-load_checkpoint(torch.load("models/last-model-2.pth.tar"), model)
+load_checkpoint(torch.load("models/170324-16-2.pth.tar"), model)
 model = model.to(device="cuda")
+model.eval()
 
 val_transform = A.Compose(
     [
@@ -39,10 +40,11 @@ import os
 import torchvision
 import cv2
 
-read_dir = "data/test/real1.png"
+read_dir = "data/val/img/real1.jpg"
 write_dir = "testdir"
 
 image = cv2.imread(read_dir)
+print(np.shape(image))
 image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 image = cv2.resize(image, (1000, 1000))
 print(f"Read (Min: {np.min(image)}, Max: {np.max(image)}, Shape: {np.shape(image)})")
@@ -57,7 +59,8 @@ print(f"Processed (Min: {np.min(host_input)}, Max: {np.max(host_input)}, Shape: 
 print(f"Processed tensor (Min: {torch.min(image)}, Max: {torch.max(image)}, Shape: {image.shape})")
 cv2.imwrite("testoutput/cropped.png", host_input)
 
-pred = model(image)[:, :3, :, :].float()
+with torch.no_grad():
+    pred = model(image)[:, :3, :, :].float()
 print(f"Predict tensor (Min: {torch.min(pred)}, Max: {torch.max(pred)}, Shape: {pred.shape})")
 
 folder = "testoutput"

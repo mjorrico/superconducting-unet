@@ -63,15 +63,20 @@ def train_fn(loader, model, optimizer, loss_fn, scaler):
 def main():
     train_transform = A.Compose(
         [
+            A.RandomGridShuffle(grid=(3, 3), p=1),
             A.RandomCrop(IMAGE_HEIGHT, IMAGE_WIDTH, True),
-            # TODO: add 90deg rotations
+            A.RandomBrightnessContrast((-0.2, 0.2), (-0.1, 0.1), p=1),
+            A.Sharpen(alpha=(0.2, 0.5), p=0.1),
+            A.PixelDropout(p=0.8),
+            A.Solarize(threshold=np.random.randint(0, 255), p=0.3),
+            A.InvertImg(p=0.3),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
             A.MultiplicativeNoise(
-                (0.7, 1.3),
+                (0.8, 1.2),
                 elementwise=True,
                 per_channel=False,
-                p=0.5,
+                p=0.3,
             ),
             A.Normalize(
                 mean=0,
