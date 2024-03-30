@@ -1,0 +1,1 @@
+from PySuperwire.generator import WireGenerator

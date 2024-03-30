@@ -9,8 +9,10 @@ images/
 *.png
 *.jpg
 *.gif
+*.tif
 __*__
 *.tar.gz
 *.pth.tar
+sandbox.ipynb
 
 useful_functions.py

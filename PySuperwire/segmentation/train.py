@@ -5,6 +5,7 @@ from tqdm import tqdm
 import torch.nn as nn
 import torch.optim as optim
 from model import WireUNet
+import numpy as np
 
 from utils import (
     load_checkpoint,
@@ -20,12 +21,12 @@ LEARNING_RATE = 1e-4
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 CUDA_VERSION = torch.version.cuda if DEVICE == "cuda" else "-"
 BATCH_SIZE = 32
-NUM_EPOCHS = 5
-NUM_WORKERS = 2
+NUM_EPOCHS = 2
+NUM_WORKERS = 4
 IMAGE_HEIGHT = 240
 IMAGE_WIDTH = 240
 PIN_MEMORY = True
-LOAD_MODEL = False
+LOAD_MODEL = True
 TRAIN_IMG_DIR = "data/train/img"
 TRAIN_MASK_DIR = "data/train/mask"
 VAL_IMG_DIR = "data/val/img"
@@ -101,10 +102,10 @@ def main():
 
     model = WireUNet(in_channels=1, out_channels=4, features=FEATURES)
     if LOAD_MODEL:
-        load_checkpoint(torch.load("models/my_checkpoint.pth.tar"), model)
+        load_checkpoint(torch.load("models/30032024-16-3.pth.tar"), model)
     model = model.to(device=DEVICE)
 
-    loss_weights = torch.Tensor([1.1, 0.9, 0.6, 0.6]).to(device=DEVICE)
+    loss_weights = torch.Tensor([1.1, 0.9, 0.6, 0.4]).to(device=DEVICE)
     loss_fn = nn.CrossEntropyLoss(loss_weights)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 

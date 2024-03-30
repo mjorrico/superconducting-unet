@@ -1,15 +1,15 @@
-import warnings, imageio, hashlib, pickle, glob, cv2, os
+import warnings, pkg_resources, imageio, hashlib, pickle, cv2, os
 from copy import deepcopy
-import poly_generator as pg
-from time import time
+from .poly_generator import generate as pg
+from tqdm import tqdm
 
 import concurrent.futures
 import numpy as np
 
 
 class WireGenerator:
-    def __init__(self, void_path):
-        self.void_dict = self.__read_void(void_path)
+    def __init__(self):
+        self.void_dict = self._read_void()
 
         self.img_size = 1000
         self.variance = 0.4
@@ -25,25 +25,20 @@ class WireGenerator:
         self.gridx, self.gridy = np.meshgrid(x, y)
         self.dist_array = np.sqrt((self.gridx - c) ** 2 + (self.gridy - c) ** 2)
 
-    def __read_void(self, void_path):
-        filepath = os.path.join(void_path, "void_*.pickle")
-        files = glob.glob(filepath)
-
-        if len(files) == 0:
-            raise RuntimeError(
-                'Void stock photo is not found. Filename format has to be "void_*.pickle"'
-            )
+    def _read_void(self):
+        sizes = [7, 10, 15, 20]
+        files = [f"void_{str(s).zfill(2)}.pickle" for s in sizes]
 
         outputdict = {}
         for file in files:
-            with open(file, "rb") as f:
+            with pkg_resources.resource_stream(__name__, f"void/{file}") as f:
                 arr = pickle.load(f)
                 size = np.shape(arr)[1]
                 outputdict[size] = arr
 
         return outputdict
 
-    def __random__hash(self, len):
+    def _random__hash(self, len):
         random_data = os.urandom(16)
         hash_object = hashlib.sha256()
         hash_object.update(random_data)
@@ -55,8 +50,6 @@ class WireGenerator:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
         msk = cv2.cvtColor(msk, cv2.COLOR_BGR2RGB)
         animation_name = os.path.join(save_path, f"{file_name}.gif")
-        cv2.imwrite("img.png", img)
-        cv2.imwrite("msk.png", msk)
         imageio.mimsave(animation_name, [img, msk], fps=0.5, format="GIF", loop=0)
 
     def _image_saver(self, save_path, file_prefix, img_idx):
@@ -71,14 +64,14 @@ class WireGenerator:
         if img_idx % 1000 == 999:
             print(f"Image {img_idx} saved!")
 
-    def __check_copper_size(self, copper_mask):
+    def _check_copper_size(self, copper_mask):
         fillrate = np.sum(copper_mask > 0)
         if fillrate < 0.01:
             raise ValueError("Cable is too small. Increase wire radius.")
         elif fillrate < 0.05:
             warnings.warn("Cable fillrate is lower than 5%.", UserWarning)
 
-    def __spread_void(self, void_group, n_void, copper_mask, void_mask, n_trial=300):
+    def _spread_void(self, void_group, n_void, copper_mask, void_mask, n_trial=300):
         void_count, void_size, _ = np.shape(void_group)
 
         for _ in range(n_void):
@@ -146,7 +139,7 @@ class WireGenerator:
         # MASKS GENERATION
         radius = np.random.uniform(400, 450)
         element_size = (radius - 400) * 6 / 50 + 27 + np.random.uniform(0, 6)
-        coat_in, coat_out, hex_in, hex_out = pg.generate(
+        coat_in, coat_out, hex_in, hex_out = pg(
             radius, element_size, self.variance, self.img_size
         )
         coat_mask = cv2.fillPoly(deepcopy(self.zmat), coat_out + coat_in, 255)
@@ -156,7 +149,7 @@ class WireGenerator:
         void_mask = deepcopy(self.zmat)
 
         # ERROR CHECKING
-        self.__check_copper_size(copp_mask)
+        self._check_copper_size(copp_mask)
 
         # GENERATING VOIDS
         s = np.sum(self.smallvoid_weight)
@@ -164,8 +157,8 @@ class WireGenerator:
         counts = counts.astype(np.int32)
         for size, vcount in zip(self.smallvoid_sizes, counts):
             void_group = self.void_dict[size]
-            self.__spread_void(void_group, vcount, copp_mask, void_mask)
-        self.__spread_void(
+            self._spread_void(void_group, vcount, copp_mask, void_mask)
+        self._spread_void(
             self.void_dict[20], self.largevoid_count, copp_mask_in, void_mask
         )
 
@@ -231,25 +224,15 @@ class WireGenerator:
         msk_dir = os.path.join(save_path, "mask")
         os.makedirs(img_dir, exist_ok=True)
         os.makedirs(msk_dir, exist_ok=True)
-        file_prefix = self.__random__hash(10)
-        thread_input = [save_path, file_prefix]
+        file_prefix = self._random__hash(10)
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=8) as e:
-            futures = [
-                e.submit(self._image_saver, save_path, file_prefix, i) for i in range(N)
-            ]
+        with tqdm(total=N, desc="Drawing") as pbar:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=8) as e:
+                futures = [
+                    e.submit(self._image_saver, save_path, file_prefix, i) for i in range(N)
+                ]
+
+                for future in concurrent.futures.as_completed(futures):
+                    pbar.update(1)
 
         self.get_animation(save_path, file_prefix)
-
-
-if __name__ == "__main__":
-    gen = WireGenerator("void/")
-
-    N = 10000
-    start = time()
-    gen.generate("output", N)
-    stop = time() - start
-    print(
-        f"Time elapsed: {np.round(stop, 3)} seconds ({np.round(stop / N, 3)} seconds per image)"
-    )
-    

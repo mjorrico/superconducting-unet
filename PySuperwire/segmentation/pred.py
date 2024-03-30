@@ -72,11 +72,7 @@ def prepare_input(img):
     return np.stack(patches, axis=0) / 255
 
 
-def predict_input(patches, model_path="models/170324-16-2.pth.tar"):
-    model = WireUNet(in_channels=1, out_channels=4, features=[16, 32, 64, 128])
-    load_checkpoint(torch.load(model_path), model)
-    model = model.to(device="cuda")
-    model.eval()
+def predict_input(patches, model):
 
     patches = torch.from_numpy(patches).unsqueeze(1)
     patches = patches.float().to(device="cuda")
@@ -120,10 +116,17 @@ def main():
     print(f'Saving to "{dst}".')
     print(f"With animation: {anim}.")
 
+    model = WireUNet(in_channels=1, out_channels=4, features=[16, 32, 64, 128])
+    load_checkpoint(torch.load("models/30032024-16-3.pth.tar"), model)
+    model = model.to(device="cuda")
+    model.eval()
+
     for input_img in input_images:
         img = cv2.imread(input_img)
         patches = prepare_input(img)
-        preds = predict_input(patches)
+
+        preds = predict_input(patches, model)
+
         output_img = stitch_images(preds)
         cv2.imwrite("test_stitch.png", output_img)
         break
