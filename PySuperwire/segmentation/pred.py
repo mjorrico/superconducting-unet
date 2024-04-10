@@ -1,8 +1,8 @@
 import torch
-from model import WireUNet
+from .model import WireUNet
 
 # from dataset import SuperWireDataset
-from utils import save_predictions_as_imgs, load_checkpoint
+from .utils import save_predictions_as_imgs, load_checkpoint
 
 # import albumentations as A
 # from albumentations.pytorch import ToTensorV2
@@ -12,8 +12,9 @@ import cv2
 import os
 from glob import glob
 import sys
+from tqdm import tqdm
 
-IMG_FORMATS = ["png", "jpg", "jpeg", "tiff", "gif"]
+IMG_FORMATS = ["png", "jpg", "jpeg", "tiff", "tif", "gif"]
 
 
 def usage():
@@ -130,6 +131,38 @@ def main():
         output_img = stitch_images(preds)
         cv2.imwrite("test_stitch.png", output_img)
         break
+
+
+class   WireSegmentor:
+    def __init__(self, model_path):
+        self.model = WireUNet(in_channels=1, out_channels=4, features=[16, 32, 64, 128])
+        load_checkpoint(torch.load(model_path), self.model)
+        self.model = self.model.to(device="cuda")
+        self.model.eval()
+
+    def predict(self, path, destination, is_animate):
+        if os.path.isdir(path):
+            path = os.path.join(path, "*")
+
+        image_paths = [img for img in glob(path) if img.split(".")[-1] in IMG_FORMATS]
+
+        if len(image_paths) == 0:
+            raise ValueError("Error: No input images. Check input directory.")
+        else:
+            print(f"\nPredicting {len(image_paths)} image(s).")
+            print(f'Saving to "{destination}".')
+            print(f"With animation: {is_animate}.")
+
+        for input_img in tqdm(image_paths):
+            img = cv2.imread(input_img)
+            patches = prepare_input(img)
+            preds = predict_input(patches, self.model)
+            output_img = stitch_images(preds)
+
+            filename = input_img.split("/")[-1].split(".")[:-1]
+            filename = "".join(filename)
+            full_dest = os.path.join(destination, filename)
+            cv2.imwrite(f"{full_dest}.png", output_img)
 
 
 if __name__ == "__main__":

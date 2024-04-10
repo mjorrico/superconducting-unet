@@ -1,12 +1,12 @@
 import os
 import torch
 import torchvision
-from dataset import SuperWireDataset
+from .dataset import SuperWireDataset
 from torch.utils.data import DataLoader
 
 
 def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
-    print("Saving checkpoint...")
+    # print("Saving checkpoint...")
     torch.save(state, filename)
 
 

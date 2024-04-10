@@ -1,69 +1,56 @@
-import torch
-from model import WireUNet
-from dataset import SuperWireDataset
-from utils import save_predictions_as_imgs, load_checkpoint
+import numpy as np
+import cv2
+from glob import glob
+import os
 import albumentations as A
-from albumentations.pytorch import ToTensorV2
-from torch.utils.data import DataLoader
 
 
-model = WireUNet(in_channels=1, out_channels=4, features=[16, 32, 64, 128])
-load_checkpoint(torch.load("models/170324-16-2.pth.tar"), model)
-model = model.to(device="cuda")
-model.eval()
+folder = "data/transfer_learning"
+photopath = "1312-4"
+img_path = os.path.join("img", photopath + ".jpg")
+mask_path = os.path.join("msk", photopath + ".png")
 
-val_transform = A.Compose(
+img_raw = cv2.imread(img_path)
+msk = cv2.imread(mask_path)
+
+img = cv2.cvtColor(img_raw, cv2.COLOR_BGR2GRAY)
+# msk = cv2.cvtColor(msk, cv2.COLOR_BGR2GRAY)
+
+img = cv2.resize(img, (1000, 1000))
+msk = cv2.resize(msk, (1000, 1000))
+img_raw = cv2.resize(img_raw, (1000, 1000))
+
+# 1. SET TRANSFORMATION ARGUMENTS FIRST
+# 2. SET PROBABILITY LATER
+
+IMAGE_HEIGHT, IMAGE_WIDTH = 240, 240
+
+train_transform = A.Compose(
     [
-        A.RandomCrop(240, 240, True),
-        A.Normalize(
-            mean=0,
-            std=1,
-            max_pixel_value=255.0,
+        A.Rotate(p=1),
+        A.RandomCrop(IMAGE_HEIGHT, IMAGE_WIDTH, True),
+        A.RandomBrightnessContrast((0.3, 0.4), (-0.8, -0.4), p=1),
+        A.PixelDropout(dropout_prob=0.04, p=0.9),
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.MultiplicativeNoise(
+            (0.8, 1.2),
+            elementwise=True,
+            per_channel=False,
+            p=0.3,
         ),
-        ToTensorV2(),
     ]
 )
 
-# dataset = SuperWireDataset("data/val/img", "data/val/mask", val_transform, False)
-# loader = DataLoader(dataset, 8)
+dst = "transformation_test"
 
-# save_predictions_as_imgs(
-#     loader,
-#     model,
-#     folder="testexport/",
-#     is_binary=False,
-# )
-
-import numpy as np
-from PIL import Image
-import os
-import torchvision
-import cv2
-
-read_dir = "data/val/img/real1.jpg"
-write_dir = "testdir"
-
-image = cv2.imread(read_dir)
-print(np.shape(image))
-image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-image = cv2.resize(image, (1000, 1000))
-print(f"Read (Min: {np.min(image)}, Max: {np.max(image)}, Shape: {np.shape(image)})")
-
-aug = val_transform(image=image)
-image = aug["image"].unsqueeze(0).to(device="cuda")
-
-host_input = image.to(device="cpu").detach().numpy() * 255
-host_input = host_input.astype(np.uint8)[0]
-host_input = np.moveaxis(host_input, 0, -1)
-print(f"Processed (Min: {np.min(host_input)}, Max: {np.max(host_input)}, Shape: {np.shape(host_input)})")
-print(f"Processed tensor (Min: {torch.min(image)}, Max: {torch.max(image)}, Shape: {image.shape})")
-cv2.imwrite("testoutput/cropped.png", host_input)
-
-with torch.no_grad():
-    pred = model(image)[:, :3, :, :].float()
-print(f"Predict tensor (Min: {torch.min(pred)}, Max: {torch.max(pred)}, Shape: {pred.shape})")
-
-folder = "testoutput"
-os.makedirs(folder, exist_ok=True)
-pred_path = os.path.join(folder, f"pred_real.png")
-torchvision.utils.save_image(pred, pred_path)
+for i in range(20):
+    aug = train_transform(image=img, mask=msk)
+    img_aug = aug["image"]
+    msk_aug = aug["mask"]
+    img_aug = cv2.cvtColor(img_aug, cv2.COLOR_GRAY2BGR)
+    result = np.zeros((240, 240*3, 3))
+    result[0:240, 0:240, :] = img_aug
+    result[0:240, 240:240*2, :] = img_raw
+    result[0:240, 240*2:240*3, :] = msk_aug
+    cv2.imwrite(os.path.join(dst, f"{i}.jpg"), result)
